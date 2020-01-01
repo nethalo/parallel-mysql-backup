@@ -7,15 +7,11 @@
 clear
 
 set -o pipefail
-#set -x
-
-# Initial values
 
 lockFile="/var/lock/distBackup.lock"
 errorFile="/var/log/distBackup.err"
 logFile="/var/log/distBackup.log"
 mysqlUser=percona
-mysqlPass=percona
 mysqlPort=3306
 remoteHost=localhost
 backupPath="/data/backups/$(date +%Y%m%d)/"
@@ -23,19 +19,17 @@ email="daniel.guzman.burgos@percona.com"
 
 schemaName="sb"
 
-# Function definitions
-
 function sendAlert () {
         if [ -e "$errorFile" ]
         then
                 alertMsg=$(cat $errorFile)
-                echo -e "${alertMsg}" | mailx -s "[$HOSTNAME] ALERT Distributed backup"
+                echo -e "${alertMsg}" | mailx -s "[$HOSTNAME] ALERT Parallel backup"
         fi
 }
 
 function destructor () {
         #sendAlert
-        rm -f "$lockFile" #"$errorFile"
+        rm -f "$lockFile" "$errorFile" unlockStartSlaves
 }
 
 # Setting TRAP in order to capture SIG and cleanup things
@@ -85,21 +79,6 @@ function verifyMysql () {
         logInfo "[OK] Found 'mysql' bin"
 }
 
-function verifyPT () {
-        which pt-slave-find &> /dev/null
-        if [ $? -ne "0" ]; then
-                logInfo "[Warning] pt-slave-find not found, downloading"
-                wget percona.com/get/pt-slave-find
-                verifyExecution "$?" "Cannot find mysql client" true
-                logInfo "[OK] Found 'mysql' bin"
-                chmod +x pt-slave-find
-                mv pt-slave-find /usr/bin/pt-slave-find
-                #apt-get install libdbd-mysql-perl
-        fi
-}
-
-
-# get a list of all the tables
 function listTables () {
         out=$(mysql -u$mysqlUser  -h${remoteHost} -N -e"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '${schemaName}'" 2>&1)
         verifyExecution "$?" "Can't get the count table list. $out" true
@@ -108,7 +87,7 @@ function listTables () {
         verifyExecution "$?" "Can't get the table list. $tablesPerServer" true
         logInfo "[Info] table list gathered"
 }
-# find slaves
+
 function findSlaves () {
         out=$(mysql -u$mysqlUser  -h${remoteHost} -NB -e"SHOW SLAVE HOSTS" 2>&1)
         verifyExecution "$?" "Couldn't execute SHOW SLAVE HOSTS. Finishing script. $out" true
@@ -124,7 +103,6 @@ function findSlaves () {
         done
 }
 
-# make N files with table names divided
 makeDistLists () {
         out=$(mysql -u$mysqlUser  -h${remoteHost} -NB -e"CREATE DATABASE IF NOT EXISTS percona" 2>&1)
         verifyExecution "$?" "Couldn't execute CREATE DATABASE IF NOT EXISTS percona. Finishing script. $out" true
@@ -150,7 +128,6 @@ makeDistLists () {
         done
 }
 
-# freeze FTWRL + STOP SLAvE
 freezeServers () {
 
         out=$(mysql -u$mysqlUser  -h${remoteHost} -N -e"lock binlog for backup" 2>&1)
@@ -171,7 +148,6 @@ freezeServers () {
         done
 }
 
-# find biggest executed master pos
 findMostUpdatedSlave () {
         indexminusone=$(($index-1))
         for i in $(seq 0 ${indexminusone});
@@ -197,7 +173,6 @@ findMostUpdatedSlave () {
         greatestFile=$(echo ${sorted[-1]})
 }
 
-# execute start slave until
 syncSlaves () {
 
         indexminusone=$(($index-1))
@@ -210,7 +185,6 @@ syncSlaves () {
         done
 }
 
-# fire up N mysqldump instances (^subdivided by schema)
 startDump () {
         out=$(mkdir -p $backupPath 2>&1)
         verifyExecution "$?" "Can't create $backupPath directory ${out}" true
@@ -233,7 +207,6 @@ startDump () {
         done
 }
 
-# unlock tables/start slave
 unlockStartSlaves () {
         out=$(mysql -u$mysqlUser  -h${remoteHost} -N -e"UNLOCK BINLOG" 2>&1)
         verifyExecution "$?" "Cannot unlock binlog. $out" true
