@@ -129,23 +129,9 @@ makeDistLists () {
 }
 
 freezeServers () {
-
         out=$(mysql -u$mysqlUser  -h${remoteHost} -N -e"lock binlog for backup" 2>&1)
         verifyExecution "$?" "Cannot set lock binlog for backup. $out" true
         logInfo "[Info] lock binlog for backup set"
-        return
-
-        out=$(mysql -u$mysqlUser  -h${remoteHost} -N -e"FLUSH TABLES WITH READ LOCK" 2>&1)
-        verifyExecution "$?" "Cannot set FTWRL. $out" true
-        logInfo "[Info] FTWRL set"
-
-        for i in $(seq ${#slaves[@]});
-        do
-                host=${slaves[$i]};
-                out=$(mysql -u$mysqlUser  -h${host} -N -e"STOP SLAVE" 2>&1)
-                verifyExecution "$?" "Cannot stop slave on $host. $out" true
-                logInfo "[Info] slave stopped on $host"
-        done
 }
 
 findMostUpdatedSlave () {
